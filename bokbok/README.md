@@ -1,4 +1,4 @@
-# bokbok natural free flow speech generator over flux 🤖
+# bokbok -- A natural free flow speech generator over flux 🤖
 
 
 ## uses chatterbox Turbo (MLX)
