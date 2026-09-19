@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fancy Markdown Reader</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"/></symbol>
+    <symbol id="i-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v18a9 9 0 0 0 0-18z" fill="currentColor"/></symbol>
+    <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 8V3h10v5M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="7" y="14" width="10" height="7" rx="1"/></symbol>
+  </defs>
+</svg>
+
+<div id="app">
+  <header id="topbar">
+    <button class="icon-btn" id="btn-sidebar" title="Toggle sidebar (⌘/Ctrl+B)"><svg><use href="#i-sidebar"/></svg></button>
+    <div id="doc-title">
+      <span id="doc-name">Fancy Markdown Reader</span>
+      <span id="doc-path"></span>
+      <span id="live-dot" hidden title="Live reload: the view refreshes when the file changes on disk"></span>
+    </div>
+    <button class="text-btn" id="btn-open" title="Open file (⌘/Ctrl+O)"><svg><use href="#i-file"/></svg><span>Open file</span></button>
+    <button class="text-btn" id="btn-folder" title="Open folder (⌘/Ctrl+Shift+O)"><svg><use href="#i-folder"/></svg><span>Open folder</span></button>
+    <span class="sep"></span>
+    <button class="icon-btn" id="btn-source" title="Toggle source view (⌘/Ctrl+U)"><svg><use href="#i-code"/></svg></button>
+    <button class="icon-btn" id="btn-theme" title="Cycle theme"><svg><use href="#i-theme"/></svg></button>
+    <button class="icon-btn" id="btn-settings" title="Reading settings"><b>Aa</b></button>
+    <button class="icon-btn" id="btn-print" title="Print / save as PDF"><svg><use href="#i-print"/></svg></button>
+  </header>
+  <div id="progress"><div></div></div>
+
+  <div id="body">
+    <aside id="sidebar">
+      <div class="tabs">
+        <button data-tab="outline" class="active">Outline</button>
+        <button data-tab="files">Files</button>
+      </div>
+      <nav id="panel-outline" class="panel"><p class="empty">No headings yet.</p></nav>
+      <div id="panel-files" class="panel" hidden>
+        <input id="file-filter" type="search" placeholder="Filter files…" hidden>
+        <div id="tree"><p class="empty">Open a folder to browse its Markdown files. Relative links and images will work too.</p></div>
+      </div>
+    </aside>
+
+    <main id="viewer" tabindex="-1">
+      <section id="welcome">
+        <div class="hero">
+          <div class="logo">M<span>↓</span></div>
+          <h1>Fancy Markdown Reader</h1>
+          <p>Drop a <code>.md</code> file or a folder anywhere, paste Markdown text, or use the buttons below.<br>Everything runs locally — no network, no uploads.</p>
+          <div class="actions">
+            <button class="primary" id="w-open">Open file</button>
+            <button class="primary ghost" id="w-folder">Open folder</button>
+            <button class="link" id="w-demo">See the feature demo</button>
+          </div>
+          <div id="recents" hidden>
+            <h2>Recent</h2>
+            <ul></ul>
+          </div>
+        </div>
+      </section>
+      <div id="banner" hidden></div>
+      <article id="content" class="prose" hidden></article>
+      <pre id="source" hidden><code></code></pre>
+      <footer id="stats" hidden></footer>
+    </main>
+  </div>
+</div>
+
+<div id="settings" hidden>
+  <label>Theme
+    <select id="set-theme"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option><option value="sepia">Sepia</option></select>
+  </label>
+  <label>Font
+    <select id="set-font"><option value="sans">Sans-serif</option><option value="serif">Serif</option><option value="mono">Monospace</option></select>
+  </label>
+  <label>Width
+    <select id="set-width"><option value="narrow">Narrow</option><option value="medium">Medium</option><option value="wide">Wide</option><option value="full">Full</option></select>
+  </label>
+  <label>Text size <output id="set-size-out"></output>
+    <input id="set-size" type="range" min="13" max="24" step="1">
+  </label>
+</div>
+
+<div id="lightbox" hidden><img alt=""></div>
+<div id="dropmask" hidden><div>Drop to open</div></div>
+<div id="toast" hidden></div>
+<input type="file" id="file-input" accept=".md,.markdown,.mdown,.mkd,.mdx,.txt,text/markdown,text/plain" multiple hidden>
+<input type="file" id="dir-input" webkitdirectory hidden>
+
+<script type="text/plain" id="demo-md">---
+title: Feature demo
+author: Fancy Markdown Reader
+tags: demo, markdown, offline
+---
+
+# Feature demo
+
+This page is rendered by the reader itself. Toggle the **source view** (`</>` in the toolbar) to see the Markdown behind it.
+
+## Text formatting
+
+Plain, **bold**, *italic*, ***both***, ~~strikethrough~~, ==highlighted==, `inline code`, H<sub>2</sub>O, E = mc<sup>2</sup>, and <kbd>⌘</kbd> + <kbd>O</kbd>. Emoji shortcodes work too :rocket: :sparkles: :tada:
+
+Autolinks like https://example.com become clickable, and so do [regular links](https://example.com "With a title").
+
+> Blockquotes can hold **formatting**,
+> > and can be nested.
+
+## Alerts
+
+> [!NOTE]
+> Useful information that users should know, even when skimming.
+
+> [!TIP]
+> Open a *folder* instead of a single file so relative images and links resolve.
+
+> [!IMPORTANT]
+> Key information users need to know.
+
+> [!WARNING]
+> Urgent info that needs immediate attention.
+
+> [!CAUTION]
+> Advises about risks or negative outcomes.
+
+## Lists
+
+1. Ordered item
+2. Another one
+   - Nested bullet
+   - Another bullet
+     1. Deeper still
+3. Last one
+
+- [x] Write the parser glue
+- [x] Style everything
+- [ ] Take over the world
+
+## Code
+
+```js
+// Syntax highlighting with a copy button
+export async function greet(name = 'world') {
+  const msg = `Hello, ${name}!`;
+  console.log(msg);
+  return msg.length > 10 ? msg : null;
+}
+```
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class Point:
+    x: float
+    y: float
+
+    def dist(self, other: "Point") -> float:
+        return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2) ** 0.5
+```
+
+```diff
+- const old = true;
++ const shiny = true;
+```
+
+## Tables
+
+| Feature          | Supported | Notes                          |
+| :--------------- | :-------: | -----------------------------: |
+| GFM tables       |    ✅     | with column alignment          |
+| Task lists       |    ✅     |                                |
+| Footnotes        |    ✅     | see below[^1]                  |
+| Math             |    ✅     | KaTeX, fully offline           |
+| Diagrams         |    ✅     | Mermaid, loaded only if needed |
+
+## Math
+
+Inline math like $e^{i\pi} + 1 = 0$ sits in the text, and display math gets its own block:
+
+$$
+\int_{-\infty}^{\infty} e^{-x^2}\,dx = \sqrt{\pi}
+\qquad
+\mathbf{A} = \begin{pmatrix} a & b \\ c & d \end{pmatrix}
+$$
+
+## Diagrams
+
+```mermaid
+flowchart LR
+    A[Markdown file] --> B(Parser)
+    B --> C{Sanitize}
+    C -->|safe| D[Pretty page]
+    C -->|script tags| E[Dropped]
+```
+
+```mermaid
+sequenceDiagram
+    participant You
+    participant Reader
+    You->>Reader: Save file in your editor
+    Reader-->>You: Live reload
+```
+
+## Inline HTML
+
+<details>
+<summary>Click to expand a <code>&lt;details&gt;</code> block</summary>
+
+Markdown **still works** inside, as long as you leave a blank line after the summary.
+
+</details>
+
+<p align="center"><em>Centered paragraph via raw HTML.</em></p>
+
+<img alt="Inline SVG data image" width="220" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 80'><defs><linearGradient id='g' x1='0' x2='1'><stop offset='0' stop-color='%236366f1'/><stop offset='1' stop-color='%23ec4899'/></linearGradient></defs><rect width='220' height='80' rx='14' fill='url(%23g)'/><text x='110' y='49' font-family='sans-serif' font-size='22' font-weight='700' fill='white' text-anchor='middle'>click to zoom</text></svg>">
+
+---
+
+## Footnotes
+
+Footnotes are collected at the bottom of the page.[^1] They can be named[^note] and referenced more than once.[^1]
+
+[^1]: This is the first footnote.
+[^note]: Named footnotes can contain `code` and **formatting**.
+
+    Even multiple paragraphs, when indented.
+</script>
+
+<script src="loader.js"></script>
+</body>
+</html>
