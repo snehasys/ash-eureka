@@ -1,6 +1,7 @@
 # Fancy Markdown Reader
 
-An offline Markdown reader that runs entirely in your browser. No install, no server, no network —
+An offline Markdown reader(+offline html viewer for ios files) that runs entirely in your browser. 
+No install, no server, no network —
 just open `index.html` (double-click it, or `open index.html`).
 
 ## Opening documents
