@@ -11,6 +11,7 @@ running natively on AppleSilicon (MLX/Metal) instead of the official PyTorch pac
 
 ```bash
 pip3 install --user uv               # if not already installed
+echo 'export PATH="$HOME/Library/Python/3.14/bin:$PATH"' >> ~/.zshrc # otherwise zsh wont be able to find your uv installation
 uv venv --python 3.11 .venv          # isolated Python 3.11, doesn't touch system Python
 uv pip install --python .venv -U mlx-audio flask
 ```
