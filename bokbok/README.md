@@ -1,12 +1,13 @@
-[README.md](https://github.com/user-attachments/files/32416909/README.md)
-# Chatterbox Turbo (MLX)
+# bokbok natural free flow speech generator over flux 🤖
 
-Fast, expressive local TTS using [Chatterbox Turbo](https://www.resemble.ai/chatterbox-turbo/) via the
+
+## uses chatterbox Turbo (MLX)
+
+Fast, expresive local TTS using [Chatterbox Turbo](https://www.resemble.ai/chatterbox-turbo/) via the
 community [mlx-audio](https://github.com/Blaizzy/mlx-audio) port (`mlx-community/chatterbox-turbo-fp16`),
-running natively on Apple Silicon (MLX/Metal) instead of the official PyTorch package — this avoids a
-known PyTorch-MPS crash bug and is faster on this hardware.
+running natively on AppleSilicon (MLX/Metal) instead of the official PyTorch package — Because I have a blazing fast mbp.
 
-## Setup (one-time)
+## Setup (just one-time)
 
 ```bash
 pip3 install --user uv               # if not already installed
