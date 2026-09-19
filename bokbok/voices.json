@@ -1,0 +1,112 @@
+{
+  "default": {
+    "ref_audio": null,
+    "ref_text": null,
+    "description": "Model's built-in voice (no cloning)"
+  },
+  "uk_female_abigail": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_UK_Abigail_vagabond.wav",
+    "ref_text": null,
+    "description": "British female (Abigail, vagabond)"
+  },
+  "uk_female_liss": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_UK_Liss_Lulworth.wav",
+    "ref_text": null,
+    "description": "British female (Liss, Lulworth)"
+  },
+  "uk_female_sarah": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_UK_A_Sarah_SH.mp3",
+    "ref_text": null,
+    "description": "British female (Sarah)"
+  },
+  "uk_female_esther_irish_accent": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_UK_EstherEnglishWithAnIrishAccent.mp3",
+    "ref_text": null,
+    "description": "English speaker with an Irish accent (Esther)"
+  },
+  "uk_female_cathy": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_UK_F_CathyK.mp3",
+    "ref_text": null,
+    "description": "British female (Cathy K.)"
+  },
+  "uk_female_julie_ann": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_UK_F_Julie-AnnD.mp3",
+    "ref_text": null,
+    "description": "British female (Julie-Ann D.)"
+  },
+  "uk_girl_julie": {
+    "ref_audio": "voices/voiceover_sample_actors/Eng_UK_Girl_JULIE_2015.mp3",
+    "ref_text": null,
+    "description": "British young female/girl (Julie)"
+  },
+  "uk_male_david": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_UK_M_DavidS.mp3",
+    "ref_text": null,
+    "description": "British male (David S.)"
+  },
+  "uk_male_jethro": {
+    "ref_audio": "voices/voiceover_sample_actors/Eng_UK_M_Jethro.mp3",
+    "ref_text": null,
+    "description": "British male (Jethro)"
+  },
+  "uk_male_marc": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_UK_M_MarcC.mp3",
+    "ref_text": null,
+    "description": "British male (Marc C.)"
+  },
+  "uk_male_mike": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_UK_M_MikeC.mp3",
+    "ref_text": null,
+    "description": "British male (Mike C.)"
+  },
+  "uk_male_norman": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_UK_M_NormanG.mp3",
+    "ref_text": null,
+    "description": "British male (Norman G.)"
+  },
+  "uk_male_peter": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_UK_M_PeterB.mp3",
+    "ref_text": null,
+    "description": "British male (Peter B.)"
+  },
+  "uk_male_simon": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_UK_M_SimonP.mp3",
+    "ref_text": null,
+    "description": "British male (Simon P.)"
+  },
+  "us_female_kim": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_US_F_KimW.mp3",
+    "ref_text": null,
+    "description": "American female (Kim W.)"
+  },
+  "us_male_dcg": {
+    "ref_audio": "voices/voiceover_sample_actors/ENG_US_M_DCG.mp3",
+    "ref_text": null,
+    "description": "American male (DCG)"
+  },
+  "hindi_female_ad": {
+    "ref_audio": "voices/voiceover_sample_actors/HIN_F_AD.mp3",
+    "ref_text": null,
+    "description": "Hindi female (AD)"
+  },
+  "hindi_female_anjum": {
+    "ref_audio": "voices/voiceover_sample_actors/HIN_F_AnjumS.mp3",
+    "ref_text": null,
+    "description": "Hindi female (Anjum S.)"
+  },
+  "hindi_female_khan": {
+    "ref_audio": "voices/voiceover_sample_actors/HIN_F_Khan.mp3",
+    "ref_text": null,
+    "description": "Hindi female (Khan)"
+  },
+  "hindi_female_vo01": {
+    "ref_audio": "voices/voiceover_sample_actors/HIN_hindi_fvo_01_nex-anp.mp3",
+    "ref_text": null,
+    "description": "Hindi female voiceover (01)"
+  },
+  "hindi_male_darshan": {
+    "ref_audio": "voices/voiceover_sample_actors/HIN_M_Darshan.mp3",
+    "ref_text": null,
+    "description": "Hindi male (Darshan)"
+  }
+}
