@@ -155,7 +155,7 @@ button.link:hover { color: var(--accent); }
 /* ---------- Overlays ---------- */
 #banner {
   max-width: var(--prose-width); margin: 16px auto -16px; padding: 9px 14px; border-radius: 9px; font-size: 13px;
-  background: var(--accent-soft); color: var(--fg); display: flex; gap: 10px; align-items: center;
+  background: var(--accent-soft); color: var(--fg); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center;
 }
 #banner button { border: 0; background: none; color: var(--accent); font-weight: 600; padding: 0; }
 #banner .x { margin-left: auto; color: var(--fg-muted); font-weight: 400; }
@@ -176,6 +176,11 @@ button.link:hover { color: var(--accent); }
   background: var(--fg); color: var(--bg); padding: 9px 16px; border-radius: 9px; font-size: 13px; box-shadow: var(--shadow);
 }
 #stats { max-width: var(--prose-width); margin: 0 auto; padding: 0 32px 40px; color: var(--fg-muted); font-size: 12px; }
+
+/* ---------- HTML documents (sandboxed iframe that fills the viewer and scrolls itself) ---------- */
+#viewer.html-mode { display: flex; flex-direction: column; overflow: hidden; }
+#viewer.html-mode #banner { margin: 8px 12px; max-width: none; flex: none; }
+#htmlframe { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
 
 /* ---------- Source view ---------- */
 #source {
@@ -285,7 +290,7 @@ button.link:hover { color: var(--accent); }
 /* ---------- Print ---------- */
 @media print {
   html, body, #app, #body, #viewer { height: auto !important; overflow: visible !important; display: block; }
-  #topbar, #progress, #sidebar, #banner, #stats, #settings, #toast, .code-head button, .prose .anchor { display: none !important; }
+  #topbar, #progress, #sidebar, #banner, #stats, #htmlframe, #settings, #toast, .code-head button, .prose .anchor { display: none !important; }
   .prose { max-width: none; padding: 0; }
   .prose pre { white-space: pre-wrap; }
   .prose pre, .prose table, .prose .alert, .prose img, .prose .mermaid-block { break-inside: avoid; }

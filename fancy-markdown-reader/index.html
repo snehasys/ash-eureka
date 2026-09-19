@@ -45,7 +45,7 @@
       <nav id="panel-outline" class="panel"><p class="empty">No headings yet.</p></nav>
       <div id="panel-files" class="panel" hidden>
         <input id="file-filter" type="search" placeholder="Filter files…" hidden>
-        <div id="tree"><p class="empty">Open a folder to browse its Markdown files. Relative links and images will work too.</p></div>
+        <div id="tree"><p class="empty">Open a folder to browse its Markdown and HTML files. Relative links and images will work too.</p></div>
       </div>
     </aside>
 
@@ -54,7 +54,7 @@
         <div class="hero">
           <div class="logo">M<span>↓</span></div>
           <h1>Fancy Markdown Reader</h1>
-          <p>Drop a <code>.md</code> file or a folder anywhere, paste Markdown text, or use the buttons below.<br>Everything runs locally — no network, no uploads.</p>
+          <p>Drop a <code>.md</code> or <code>.html</code> file or a folder anywhere, paste Markdown text, or use the buttons below.<br>Everything runs locally — no network, no uploads.</p>
           <div class="actions">
             <button class="primary" id="w-open">Open file</button>
             <button class="primary ghost" id="w-folder">Open folder</button>
@@ -68,6 +68,7 @@
       </section>
       <div id="banner" hidden></div>
       <article id="content" class="prose" hidden></article>
+      <iframe id="htmlframe" title="HTML document" hidden></iframe>
       <pre id="source" hidden><code></code></pre>
       <footer id="stats" hidden></footer>
     </main>
@@ -92,7 +93,7 @@
 <div id="lightbox" hidden><img alt=""></div>
 <div id="dropmask" hidden><div>Drop to open</div></div>
 <div id="toast" hidden></div>
-<input type="file" id="file-input" accept=".md,.markdown,.mdown,.mkd,.mdx,.txt,text/markdown,text/plain" multiple hidden>
+<input type="file" id="file-input" accept=".md,.markdown,.mdown,.mkd,.mdx,.txt,.html,.htm,text/markdown,text/plain,text/html" multiple hidden>
 <input type="file" id="dir-input" webkitdirectory hidden>
 
 <script type="text/plain" id="demo-md">---

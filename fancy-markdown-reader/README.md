@@ -1,12 +1,12 @@
 # Fancy Markdown Reader
 
-An fancy offline Markdown reader(+offline html viewer for ios files) that runs entirely in your browser. 
+A fancy offline Markdown reader(+offline html viewer for ios files) that runs entirely in your browser. 
 No install, no server, no network —
 just open `index.html` (double-click it, or `open index.html`).
 
 ## Opening documents
 
-- **Open file** (<kbd>⌘/Ctrl</kbd>+<kbd>O</kbd>) — a single `.md` file.
+- **Open file** (<kbd>⌘/Ctrl</kbd>+<kbd>O</kbd>) — a single `.md` or `.html` file.
 - **Open folder** (<kbd>⌘/Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd>) — browse every Markdown file in a file tree; relative
   images and links between documents work.
 - **Drag & drop** a file or folder anywhere, or **paste** Markdown text.
@@ -22,6 +22,17 @@ copy buttons, KaTeX math (`$…$`, `$$…$$`, ` ```math `), Mermaid diagrams (` 
 GitHub alerts (`> [!NOTE]`), `==highlight==`, `:emoji:` shortcodes, YAML front matter, heading
 anchors, and sanitized inline HTML (`<details>`, `<kbd>`, `<sub>`, `<img width>`, …).
 Click **See the feature demo** on the start screen for a tour.
+
+## HTML files
+
+`.html` / `.htm` files open too — from the file picker, a folder, drag & drop, or links between documents.
+They are shown as-is (their own styles and layout) inside a sandboxed frame, with the outline, scroll
+progress, source view and live reload still working. Open the **folder** rather than the single file so
+linked stylesheets, images and fonts (including `url(...)` inside the CSS) and links to other pages resolve.
+
+Scripts in an HTML file are **off by default**; a banner offers "Run them for this file". With scripts on,
+the file runs in an isolated origin with no access to the reader or your other files, and the outline is
+unavailable for it.
 
 ## Reading
 

@@ -6,12 +6,14 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const MD_EXT = /\.(md|markdown|mdown|mkd|mdx|txt)$/i;
+const HTML_EXT = /\.html?$/i;
+const isDoc = p => MD_EXT.test(p) || HTML_EXT.test(p);
 const SKIP_DIRS = new Set(['node_modules', '.git', '.svn', '.hg', '.venv', '__pycache__']);
 const MAX_FILES = 20000;
 const HAS_FS_API = 'showOpenFilePicker' in window;
 
 const el = {
-  viewer: $('#viewer'), welcome: $('#welcome'), content: $('#content'), source: $('#source'), stats: $('#stats'),
+  viewer: $('#viewer'), welcome: $('#welcome'), content: $('#content'), frame: $('#htmlframe'), source: $('#source'), stats: $('#stats'),
   banner: $('#banner'), outline: $('#panel-outline'), tree: $('#tree'), filter: $('#file-filter'),
   docName: $('#doc-name'), docPath: $('#doc-path'), liveDot: $('#live-dot'), progress: $('#progress div'),
   settings: $('#settings'), lightbox: $('#lightbox'), dropmask: $('#dropmask'), toast: $('#toast'),
@@ -20,7 +22,8 @@ const el = {
 
 // ws:  { name, files: Map<path, { getFile(), live }> }   (null when a lone file is open)
 // doc: { path, name, getFile, live, text, stamp, size }
-const state = { ws: null, doc: null, sourceView: false, renderId: 0, blobs: [], bannerDismissed: false };
+// frameDoc: the iframe's document while an HTML file is shown with scripts off (null otherwise)
+const state = { ws: null, doc: null, sourceView: false, renderId: 0, blobs: [], bannerDismissed: false, frameDoc: null, scriptsFor: null, noFrameAccess: false };
 
 /* ================= Settings ================= */
 
@@ -298,11 +301,11 @@ function resolvePath(baseDir, rel) {
   return parts.join('/');
 }
 
-function lookup(href) {
+function lookup(href, baseDir = dirname(state.doc?.path || '')) {
   if (!state.ws || !state.doc) return null;
   let p = href.split(/[?#]/)[0];
   try { p = decodeURIComponent(p); } catch {}
-  const path = resolvePath(dirname(state.doc.path), p);
+  const path = resolvePath(baseDir, p);
   const entry = state.ws.files.get(path);
   return entry ? { path, entry } : null;
 }
@@ -332,6 +335,9 @@ async function render({ keepScroll = false, hash = '' } = {}) {
   const doc = state.doc, id = ++state.renderId;
   const oldBlobs = state.blobs;
   state.blobs = [];
+  if (HTML_EXT.test(doc.path)) return renderHtml(doc, id, oldBlobs, { keepScroll, hash });
+  state.frameDoc = null;
+  el.frame.removeAttribute('srcdoc');
   let frag;
   try {
     frag = buildFragment(doc.text);
@@ -348,15 +354,7 @@ async function render({ keepScroll = false, hash = '' } = {}) {
   const scroll = el.viewer.scrollTop;
   el.content.replaceChildren(frag);
   oldBlobs.forEach(URL.revokeObjectURL);
-  $('code', el.source).innerHTML = hljs.highlight(doc.text, { language: 'markdown', ignoreIllegals: true }).value;
-
-  el.welcome.hidden = true;
-  el.stats.hidden = false;
-  applyView();
-  el.docName.textContent = doc.name;
-  el.docPath.textContent = state.ws ? `${state.ws.name}/${doc.path}` : '';
-  el.liveDot.hidden = !doc.live;
-  document.title = `${doc.name} — Fancy Markdown Reader`;
+  updateChrome(doc, 'markdown');
 
   const words = (doc.text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) || []).length;
   el.stats.textContent = `${words.toLocaleString()} words · ${Math.max(1, Math.round(words / 220))} min read · ${doc.text.split('\n').length.toLocaleString()} lines`;
@@ -375,22 +373,181 @@ async function render({ keepScroll = false, hash = '' } = {}) {
   renderMermaid(id);
 }
 
+/* ---- HTML documents ----
+   Shown as-is in a sandboxed iframe. Scripts are off by default; then the frame is same-origin, so the outline,
+   scroll tracking and link handling work on it. If the user opts in to scripts, the frame gets an opaque origin
+   instead (never both), which keeps the file away from this app at the price of those extras. */
+
+// Without this, "#section" and relative links would resolve against the reader's own URL and load the reader itself.
+const FRAME_HELPER = `(() => {
+  const go = hash => {
+    let id = hash; try { id = decodeURIComponent(hash); } catch (e) {}
+    const t = id && (document.getElementById(id) || document.getElementsByName(id)[0]);
+    if (t) t.scrollIntoView(); else if (!id) scrollTo(0, 0);
+  };
+  addEventListener('click', e => {
+    const a = e.target.closest && e.target.closest('a[href], area[href]');
+    if (!a || e.defaultPrevented) return;
+    const href = a.getAttribute('href');
+    if (href.startsWith('#')) { e.preventDefault(); go(href.slice(1)); }
+    else if (!/^([a-z][a-z0-9+.-]*:|\\/\\/)/i.test(href)) { e.preventDefault(); parent.postMessage({ fmrLink: href }, '*'); }
+  });
+  addEventListener('message', e => { if (e.source === parent && e.data && typeof e.data.fmrHash === 'string') go(e.data.fmrHash); });
+})();`;
+
+const frameScroller = () => state.frameDoc.scrollingElement || state.frameDoc.documentElement;
+
+async function assetUrl(entry, asData) {
+  const file = await entry.getFile();
+  if (asData) return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(file); });
+  const url = URL.createObjectURL(file);
+  state.blobs.push(url);
+  return url;
+}
+
+const isRelative = u => !!u && !isExternal(u) && !u.startsWith('#');
+
+async function rewriteCssUrls(css, baseDir, asData) {
+  const refs = [...new Set([...css.matchAll(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g)].map(m => m[2]).filter(isRelative))];
+  const map = new Map();
+  await Promise.all(refs.map(async ref => {
+    const hit = lookup(ref, baseDir);
+    if (hit) try { map.set(ref, await assetUrl(hit.entry, asData)); } catch {}
+  }));
+  return css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (all, _q, ref) => map.has(ref) ? `url("${map.get(ref)}")` : all);
+}
+
+// Point relative resources at files from the open folder. Returns how many could not be found.
+async function resolveHtmlAssets(parsed, asData) {
+  let missing = 0;
+  const baseDir = dirname(state.doc.path);
+  const jobs = [];
+  for (const node of $$('img[src], source[src], video[src], audio[src], script[src], embed[src], track[src], video[poster], link[href]', parsed)) {
+    for (const attr of ['src', 'poster', 'href']) {
+      const val = node.getAttribute(attr);
+      if (!isRelative(val)) continue;
+      const hit = lookup(val);
+      if (!hit) { if (node.tagName !== 'LINK' || /stylesheet|icon/i.test(node.rel)) missing++; continue; }
+      jobs.push((async () => {
+        try {
+          if (node.tagName === 'LINK' && /stylesheet/i.test(node.rel)) { // inline it so url(...) inside the CSS can be fixed too
+            const style = parsed.createElement('style');
+            if (node.media) style.media = node.media;
+            style.textContent = await rewriteCssUrls(await (await hit.entry.getFile()).text(), dirname(hit.path), asData);
+            node.replaceWith(style);
+          } else {
+            node.setAttribute(attr, await assetUrl(hit.entry, asData));
+            node.removeAttribute('srcset');
+          }
+        } catch { missing++; }
+      })());
+    }
+  }
+  for (const style of $$('style', parsed)) jobs.push(rewriteCssUrls(style.textContent, baseDir, asData).then(css => { style.textContent = css; }));
+  for (const node of $$('[style*="url("]', parsed)) jobs.push(rewriteCssUrls(node.getAttribute('style'), baseDir, asData).then(css => node.setAttribute('style', css)));
+  await Promise.all(jobs);
+  return missing;
+}
+
+async function renderHtml(doc, id, oldBlobs, { keepScroll, hash }) {
+  // safe: scripts off, frame readable by us · helper: scripts off, but the browser won't let us read the frame,
+  // so only our link helper may run (CSP nonce) · scripts: the file's own scripts run too
+  const scripts = state.scriptsFor === doc.path;
+  const mode = scripts ? 'scripts' : state.noFrameAccess ? 'helper' : 'safe';
+  const parsed = new DOMParser().parseFromString(doc.text, 'text/html');
+  const hasScripts = !!parsed.querySelector('script');
+  for (const m of $$('meta[http-equiv="refresh" i], base', parsed)) m.remove();
+  if (mode !== 'safe') { // we can't reach into this frame, so a tiny helper inside it handles links and reports relative ones to us
+    const helper = parsed.createElement('script');
+    helper.textContent = FRAME_HELPER;
+    const head = [Object.assign(parsed.createElement('base'), { target: '_blank' }), helper];
+    if (mode === 'helper') {
+      const nonce = crypto.randomUUID();
+      helper.setAttribute('nonce', nonce); // as an attribute, so it survives serialisation into srcdoc
+      const csp = parsed.createElement('meta');
+      csp.httpEquiv = 'Content-Security-Policy';
+      csp.content = `script-src 'nonce-${nonce}'`;
+      head.unshift(csp);
+    }
+    parsed.head.prepend(...head);
+  }
+  const seen = new Set($$('[id]', parsed).map(n => n.id));
+  for (const h of $$('h1,h2,h3,h4,h5,h6', parsed)) {
+    if (h.id) continue;
+    const base = slugify(h.textContent) || 'section';
+    let slug = base;
+    for (let n = 1; seen.has(slug); n++) slug = `${base}-${n}`;
+    seen.add(h.id = slug);
+  }
+  const missing = await resolveHtmlAssets(parsed, mode !== 'safe');
+  if (id !== state.renderId) return;
+
+  const scroll = state.frameDoc ? frameScroller().scrollTop : 0;
+  state.frameDoc = null;
+  el.content.replaceChildren();
+  updateChrome(doc, 'xml');
+  showBanner(missing, hasScripts && !scripts);
+  markActiveFile();
+
+  await new Promise(res => {
+    el.frame.addEventListener('load', res, { once: true });
+    el.frame.setAttribute('sandbox', mode === 'safe' ? 'allow-same-origin' : 'allow-scripts allow-popups allow-popups-to-escape-sandbox');
+    el.frame.srcdoc = (parsed.doctype ? '<!doctype html>' : '') + parsed.documentElement.outerHTML;
+  });
+  if (id !== state.renderId) return;
+  oldBlobs.forEach(URL.revokeObjectURL);
+
+  let fd = null;
+  try { fd = mode === 'safe' ? el.frame.contentDocument : null; } catch {}
+  if (mode === 'safe' && !fd) { state.noFrameAccess = true; return render({ keepScroll, hash }); }
+  state.frameDoc = fd;
+  if (!fd) {
+    headings = [];
+    el.outline.innerHTML = `<p class="empty">The outline isn’t available ${scripts ? 'while this file’s scripts are running' : 'for HTML files in this browser'}.</p>`;
+    el.progress.style.width = '0';
+    if (hash) el.frame.contentWindow.postMessage({ fmrHash: hash }, '*');
+    return;
+  }
+  fd.addEventListener('click', e => { const a = e.target.closest?.('a[href], area[href]'); if (a) followLink(a, e); });
+  el.frame.contentWindow.addEventListener('scroll', onScroll, { passive: true });
+  buildOutline();
+  if (keepScroll) frameScroller().scrollTop = scroll;
+  else if (hash) goHash(hash);
+  onScroll();
+}
+
+function updateChrome(doc, sourceLang) {
+  $('code', el.source).innerHTML = hljs.highlight(doc.text, { language: sourceLang, ignoreIllegals: true }).value;
+  el.welcome.hidden = true;
+  applyView();
+  el.docName.textContent = doc.name;
+  el.docPath.textContent = state.ws ? `${state.ws.name}/${doc.path}` : '';
+  el.liveDot.hidden = !doc.live;
+  document.title = `${doc.name} — Fancy Markdown Reader`;
+}
+
 function applyView() {
-  const hasDoc = !!state.doc;
-  el.content.hidden = !hasDoc || state.sourceView;
+  const hasDoc = !!state.doc, html = hasDoc && HTML_EXT.test(state.doc.path), frame = html && !state.sourceView;
+  el.content.hidden = !hasDoc || html || state.sourceView;
+  el.frame.hidden = !frame;
+  el.viewer.classList.toggle('html-mode', frame);
+  el.stats.hidden = !hasDoc || html;
   el.source.hidden = !hasDoc || !state.sourceView;
   $('#btn-source').classList.toggle('active', state.sourceView);
 }
 
-function showBanner(missing) {
-  if (!missing || state.ws || state.bannerDismissed) { el.banner.hidden = true; return; }
-  el.banner.hidden = false;
-  el.banner.innerHTML = `<span>${missing} relative image${missing > 1 ? 's' : ''} can’t be shown for a single file.</span>
-    <button type="button" data-act="folder">Open the containing folder</button><button type="button" class="x" data-act="x" title="Dismiss">✕</button>`;
+function showBanner(missing, scriptsOff = false) {
+  const parts = [];
+  if (missing && !state.ws) parts.push(`<span>${missing} linked file${missing > 1 ? 's' : ''} (images, styles…) can’t be loaded for a single file.</span>
+    <button type="button" data-act="folder">Open the containing folder</button>`);
+  if (scriptsOff) parts.push(`<span>Scripts in this HTML file are switched off.</span><button type="button" data-act="scripts">Run them for this file</button>`);
+  el.banner.hidden = !parts.length || state.bannerDismissed;
+  el.banner.innerHTML = parts.join('') + '<button type="button" class="x" data-act="x" title="Dismiss">✕</button>';
 }
 el.banner.addEventListener('click', e => {
   const act = e.target.dataset.act;
   if (act === 'folder') pickFolder();
+  if (act === 'scripts' && state.doc) { state.scriptsFor = state.doc.path; render({ keepScroll: true }); }
   if (act === 'x') { state.bannerDismissed = true; el.banner.hidden = true; }
 });
 
@@ -436,8 +593,10 @@ async function renderMermaid(id) {
 /* ================= Outline & scrolling ================= */
 
 let headings = [];
+const docRoot = () => state.frameDoc || el.content;
+
 function buildOutline() {
-  headings = $$('h1,h2,h3,h4,h5,h6', el.content).filter(h => !h.closest('.frontmatter'));
+  headings = $$('h1,h2,h3,h4,h5,h6', docRoot()).filter(h => !h.closest('.frontmatter'));
   if (!headings.length) { el.outline.innerHTML = '<p class="empty">No headings in this document.</p>'; return; }
   const min = Math.min(...headings.map(h => +h.tagName[1]));
   el.outline.replaceChildren(...headings.map(h => {
@@ -460,8 +619,10 @@ el.outline.addEventListener('click', e => {
 function goHash(hash) {
   let id = hash;
   try { id = decodeURIComponent(hash); } catch {}
-  const target = el.content.querySelector('#' + CSS.escape(id)) || el.content.querySelector(`a[name="${CSS.escape(id)}"]`)
-    || el.content.querySelector('#' + CSS.escape(slugify(id)));
+  const root = docRoot();
+  if (!id) { (state.frameDoc ? frameScroller() : el.viewer).scrollTop = 0; return; }
+  const target = root.querySelector('#' + CSS.escape(id)) || root.querySelector(`a[name="${CSS.escape(id)}"]`)
+    || root.querySelector('#' + CSS.escape(slugify(id) || id));
   if (target) target.scrollIntoView({ block: 'start' });
 }
 
@@ -471,10 +632,11 @@ function onScroll() {
   scrollQueued = true;
   requestAnimationFrame(() => {
     scrollQueued = false;
-    const v = el.viewer, max = v.scrollHeight - v.clientHeight;
+    const inFrame = state.frameDoc && !state.sourceView;
+    const v = inFrame ? frameScroller() : el.viewer, max = v.scrollHeight - v.clientHeight;
     el.progress.style.width = (state.doc && max > 0 ? Math.min(100, v.scrollTop / max * 100) : 0) + '%';
     if (!headings.length || state.sourceView) return;
-    const top = v.getBoundingClientRect().top + 90;
+    const top = inFrame ? 90 : v.getBoundingClientRect().top + 90;
     let current = 0;
     for (const [i, h] of headings.entries()) { if (h.getBoundingClientRect().top <= top) current = i; else break; }
     for (const [i, a] of [...el.outline.children].entries()) {
@@ -511,6 +673,7 @@ function openText(name, text) {
 
 function setWorkspace(ws) {
   state.ws = ws;
+  state.scriptsFor = null;
   state.bannerDismissed = false;
   el.filter.value = '';
   renderTree();
@@ -525,14 +688,14 @@ async function openSingle(name, entry) {
 }
 
 async function openWorkspace(name, files) {
-  const docs = [...files.keys()].filter(p => MD_EXT.test(p));
-  if (!docs.length) { toast(`No Markdown files found in “${name}”.`); return; }
+  const docs = [...files.keys()].filter(isDoc);
+  if (!docs.length) { toast(`No Markdown or HTML files found in “${name}”.`); return; }
   setWorkspace({ name, files });
   settings.sidebar = true; settings.tab = 'files';
   applySettings();
   const rootDocs = docs.filter(p => !p.includes('/'));
   const first = rootDocs.find(p => /^readme\.(md|markdown)$/i.test(p)) || rootDocs.find(p => /^index\.(md|markdown)$/i.test(p))
-    || docs.find(p => /(^|\/)readme\.(md|markdown)$/i.test(p)) || docs.sort(comparePaths)[0];
+    || rootDocs.find(p => /^index\.html?$/i.test(p)) || docs.find(p => /(^|\/)readme\.(md|markdown)$/i.test(p)) || docs.sort(comparePaths)[0];
   await openDoc(first, files.get(first));
 }
 
@@ -577,7 +740,7 @@ async function openFileHandle(h, remember = true) {
 async function pickFile() {
   if (!HAS_FS_API) { el.fileInput.click(); return; }
   try {
-    const [h] = await showOpenFilePicker({ types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown', '.mdown', '.mkd', '.mdx'], 'text/plain': ['.txt'] } }] });
+    const [h] = await showOpenFilePicker({ types: [{ description: 'Markdown or HTML', accept: { 'text/markdown': ['.md', '.markdown', '.mdown', '.mkd', '.mdx'], 'text/plain': ['.txt'], 'text/html': ['.html', '.htm'] } }] });
     await openFileHandle(h);
   } catch (e) { if (e.name !== 'AbortError') toast(e.message); }
 }
@@ -588,9 +751,11 @@ async function pickFolder() {
   catch (e) { if (e.name !== 'AbortError') toast(e.message); }
 }
 
+const unsupported = names => `Can’t open “${names[0] || 'that item'}” — supported types: .md .markdown .mdown .mkd .mdx .txt .html .htm`;
+
 function openFileList(list, name = 'Dropped files') {
-  const mds = list.filter(f => MD_EXT.test(f.name));
-  if (!mds.length) { toast('That doesn’t look like a Markdown file.'); return; }
+  const mds = list.filter(f => isDoc(f.name));
+  if (!mds.length) { toast(unsupported(list.map(f => f.name)), 6000); return; }
   if (list.length === 1) return openSingle(mds[0].name, fileEntry(mds[0]));
   return openWorkspace(name, new Map(list.map(f => [f.name, fileEntry(f)])));
 }
@@ -627,8 +792,8 @@ addEventListener('drop', async e => {
       const handles = (await Promise.all(items.map(i => i.getAsFileSystemHandle()))).filter(Boolean);
       const dir = handles.find(h => h.kind === 'directory');
       if (dir) return await openDirHandle(dir);
-      const mds = handles.filter(h => MD_EXT.test(h.name));
-      if (!mds.length) return toast('That doesn’t look like a Markdown file.');
+      const mds = handles.filter(h => isDoc(h.name));
+      if (!mds.length) return toast(unsupported(handles.map(h => h.name)), 6000);
       if (handles.length === 1) return await openFileHandle(mds[0]);
       return await openWorkspace('Dropped files', new Map(handles.map(h => [h.name, handleEntry(h)])));
     }
@@ -663,11 +828,11 @@ function renderTree() {
   const ws = state.ws;
   el.filter.hidden = !ws;
   if (!ws) {
-    el.tree.innerHTML = '<p class="empty">Open a folder to browse its Markdown files. Relative links and images will work too.</p>';
+    el.tree.innerHTML = '<p class="empty">Open a folder to browse its Markdown and HTML files. Relative links and images will work too.</p>';
     return;
   }
   const q = el.filter.value.trim().toLowerCase();
-  const paths = [...ws.files.keys()].filter(p => MD_EXT.test(p) && (!q || p.toLowerCase().includes(q))).sort(comparePaths);
+  const paths = [...ws.files.keys()].filter(p => isDoc(p) && (!q || p.toLowerCase().includes(q))).sort(comparePaths);
   const title = document.createElement('div');
   title.className = 'ws-name';
   title.textContent = ws.name;
@@ -741,19 +906,7 @@ el.content.addEventListener('click', async e => {
   }
 
   const a = e.target.closest('a[href]');
-  if (a) {
-    const href = a.getAttribute('href');
-    if (href.startsWith('#')) { e.preventDefault(); goHash(href.slice(1)); return; }
-    if (isExternal(href)) { a.target = '_blank'; a.rel = 'noopener noreferrer'; return; }
-    e.preventDefault();
-    const hit = lookup(href);
-    if (!hit) { toast(state.ws ? `Not found in this folder: ${href}` : 'Open the containing folder to follow relative links.'); return; }
-    if (MD_EXT.test(hit.path)) { openDoc(hit.path, hit.entry, href.split('#')[1] || ''); return; }
-    const url = URL.createObjectURL(await hit.entry.getFile());
-    state.blobs.push(url);
-    window.open(url, '_blank', 'noopener');
-    return;
-  }
+  if (a) return followLink(a, e);
 
   const img = e.target.closest('img');
   if (img && img.src) {
@@ -762,6 +915,32 @@ el.content.addEventListener('click', async e => {
   }
 });
 el.lightbox.addEventListener('click', () => (el.lightbox.hidden = true));
+
+async function followLink(a, e) {
+  const href = a.getAttribute('href');
+  if (href.startsWith('#')) { e.preventDefault(); goHash(href.slice(1)); return; }
+  if (isExternal(href)) {
+    if (!state.frameDoc) { a.target = '_blank'; a.rel = 'noopener noreferrer'; return; }
+    e.preventDefault(); // the sandboxed frame can't open windows itself
+    if (/^(https?|mailto|tel):/i.test(href)) window.open(href, '_blank', 'noopener');
+    return;
+  }
+  e.preventDefault();
+  openRelative(href);
+}
+
+addEventListener('message', e => { // relative link clicked inside an HTML file that runs with scripts on
+  if (e.source === el.frame.contentWindow && !state.frameDoc && typeof e.data?.fmrLink === 'string') openRelative(e.data.fmrLink);
+});
+
+async function openRelative(href) {
+  const hit = lookup(href);
+  if (!hit) { toast(state.ws ? `Not found in this folder: ${href}` : 'Open the containing folder to follow relative links.'); return; }
+  if (isDoc(hit.path)) { openDoc(hit.path, hit.entry, href.split('#')[1] || ''); return; }
+  const url = URL.createObjectURL(await hit.entry.getFile());
+  state.blobs.push(url);
+  window.open(url, '_blank', 'noopener');
+}
 
 /* ================= Live reload ================= */
 
@@ -859,7 +1038,7 @@ $('#btn-folder').onclick = $('#w-folder').onclick = pickFolder;
 $('#w-demo').onclick = showDemo;
 $('#btn-sidebar').onclick = toggleSidebar;
 $('#btn-source').onclick = toggleSource;
-$('#btn-print').onclick = () => print();
+$('#btn-print').onclick = () => (state.frameDoc && !state.sourceView ? el.frame.contentWindow : window).print();
 $('#btn-theme').onclick = () => {
   const order = ['auto', 'light', 'dark', 'sepia'];
   settings.theme = order[(order.indexOf(settings.theme) + 1) % order.length];
