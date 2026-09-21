@@ -18,6 +18,8 @@ whichever voice was generated most recently.
 """
 
 import json
+import os
+import queue
 import re
 import shutil
 import tempfile
@@ -28,15 +30,26 @@ from pathlib import Path
 MODEL = "mlx-community/chatterbox-turbo-fp16"
 ROOT = Path(__file__).parent
 VOICES_FILE = ROOT / "voices.json"
-EXAGGERATION = 0.5  # ignored by Turbo's generation, only affects conds caching key
+EXAGGERATION = 0.5  # Turbo ignores it; passed only to satisfy prepare_conditionals' signature
 
-# Conservative per-chunk word budget: a single generation call is capped at
-# ~800-1200 speech tokens with no built-in sentence splitting, so long text
-# must be chunked ourselves to avoid audio being silently cut off mid-sentence.
+# Per-chunk word budget. The model splits long text internally too (~800
+# tokens per piece), but chunking ourselves first is what gives each chunk a
+# clean boundary to stream as its own frame / playback unit. The *first* chunk
+# is kept much smaller so the listener hears something within a second or two
+# instead of waiting for a full 50-word chunk to generate.
 CHUNK_WORD_BUDGET = 50
+FIRST_CHUNK_WORD_BUDGET = 15
+
+# For the streaming path, the model's stream_generate() hands back audio every
+# STREAM_TOKEN_CHUNK speech tokens (~1.6s at 25 tok/s) *within* a chunk, so the
+# first sound lands in ~0.3s instead of after a whole chunk (~2-3s). It costs
+# ~1.5x the compute of a plain generate() (it re-vocodes the cumulative token
+# sequence each time) but still runs ~3-4x faster than real-time, so the
+# listener never waits. Batch callers (synthesize) keep the cheaper generate().
+STREAM_TOKEN_CHUNK = 40
 
 _model = None
-_conds_cache: dict = {}
+_conds_cache: dict = {}  # voice name -> (fingerprint, Conditionals); see _get_conds
 _builtin_conds = None  # the model's own default conditioning, snapshotted at load time
 _lock = threading.Lock()  # serializes all model access: MLX generate() isn't safe for concurrent calls
 
@@ -52,9 +65,15 @@ def load_voices() -> dict:
     return voices
 
 
-def split_into_chunks(text: str, word_budget: int = CHUNK_WORD_BUDGET) -> list[str]:
+def split_into_chunks(
+    text: str, word_budget: int = CHUNK_WORD_BUDGET, first_budget: int = FIRST_CHUNK_WORD_BUDGET
+) -> list[str]:
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-    chunks = []
+    chunks: list[str] = []
+
+    def budget() -> int:  # smaller budget until the first chunk is out the door
+        return first_budget if not chunks else word_budget
+
     for para in paragraphs:
         sentences = re.split(r"(?<=[.!?])\s+", para)
         current: list[str] = []
@@ -68,14 +87,17 @@ def split_into_chunks(text: str, word_budget: int = CHUNK_WORD_BUDGET) -> list[s
             # for a long stretch) must still be hard-split -- otherwise it
             # becomes one unbounded chunk that stalls streaming and risks
             # hitting the model's own generation-length cap.
-            if len(words) > word_budget:
+            if len(words) > budget():
                 if current:
                     chunks.append(" ".join(current))
                     current, current_words = [], 0
-                for i in range(0, len(words), word_budget):
-                    chunks.append(" ".join(words[i : i + word_budget]))
+                i = 0
+                while i < len(words):
+                    n = budget()
+                    chunks.append(" ".join(words[i : i + n]))
+                    i += n
                 continue
-            if current and current_words + len(words) > word_budget:
+            if current and current_words + len(words) > budget():
                 chunks.append(" ".join(current))
                 current, current_words = [], 0
             current.append(sentence)
@@ -120,21 +142,41 @@ def _get_conds(model, voice: str, preset: dict):
     `model._conds` to the right cached value before every generate() call,
     or a request can silently end up using whichever voice was used last.
     """
-    if voice not in _conds_cache:
-        ref_audio = preset.get("ref_audio")
+    ref_audio = preset.get("ref_audio")
+    # The cache is keyed on the *file*, not just the name: if voices.json is
+    # edited to repoint a name, or a voice is deleted and re-added under the
+    # same key, the fingerprint changes and we recompute instead of serving
+    # stale conditioning. No explicit invalidation needed anywhere.
+    fingerprint = (ref_audio, os.stat(ref_audio).st_mtime_ns) if ref_audio else None
+    cached = _conds_cache.get(voice)
+    if cached is None or cached[0] != fingerprint:
         if ref_audio:
             model.prepare_conditionals(ref_audio, sample_rate=model.sample_rate, exaggeration=EXAGGERATION)
-            _conds_cache[voice] = model._conds
+            conds = model._conds
         else:
-            _conds_cache[voice] = _builtin_conds
-    return _conds_cache[voice]
+            conds = _builtin_conds
+        _conds_cache[voice] = (fingerprint, conds)
+    return _conds_cache[voice][1]
 
 
-def iter_speech(text: str, voice: str = "default", word_budget: int = CHUNK_WORD_BUDGET):
-    """Yield raw WAV bytes for each chunk of `text`, as soon as it's generated.
+def _wav_bytes(audio, sample_rate: int) -> bytes:
+    import io
 
-    Lets a caller start playback before the rest of the text is done, and
-    reuses one cached voice-conditioning computation across all chunks.
+    from mlx_audio.audio_io import write as audio_write
+
+    buf = io.BytesIO()
+    audio_write(buf, audio, sample_rate, format="wav")
+    return buf.getvalue()
+
+
+def iter_speech(text: str, voice: str = "default", word_budget: int = CHUNK_WORD_BUDGET, stream: bool = True):
+    """Yield raw WAV bytes as speech is generated, so a caller can start
+    playback long before the rest of the text is done.
+
+    stream=True  -> pieces of ~1.6s arrive continuously *within* each chunk
+                    (first sound in ~0.3s). Use for live playback.
+    stream=False -> one piece per text chunk, ~1.5x less compute. Use when
+                    nobody is listening until the whole thing is done.
     """
     voices = load_voices()
     if voice not in voices:
@@ -145,26 +187,50 @@ def iter_speech(text: str, voice: str = "default", word_budget: int = CHUNK_WORD
     if not chunks:
         raise ValueError("No text to synthesize")
 
-    import io
-
     import mlx.core as mx
-    from mlx_audio.audio_io import write as audio_write
 
     model = get_model()
+    sr = model.sample_rate
+
     for chunk in chunks:
-        # Lock is held only around the actual model call, never across a
-        # `yield` -- if a consumer (e.g. a disconnected HTTP client) never
-        # resumes this generator, the lock must still get released instead
-        # of wedging every other request forever.
-        with _lock:
-            conds = _get_conds(model, voice, preset)
-            model._conds = conds  # restore: another voice's request may have overwritten this shared slot
-            results = list(model.generate(text=chunk, verbose=False))
-            wav = results[0].audio if len(results) == 1 else mx.concatenate([r.audio for r in results], axis=0)
-            buf = io.BytesIO()
-            audio_write(buf, wav, results[0].sample_rate, format="wav")
-            data = buf.getvalue()
-        yield data
+        if not stream:
+            # Lock is held only around the model call, never across a `yield`
+            # -- if the consumer (e.g. a disconnected HTTP client) never
+            # resumes us, the lock must still be released.
+            with _lock:
+                model._conds = _get_conds(model, voice, preset)  # restore the shared slot for this voice
+                results = list(model.generate(text=chunk, verbose=False))
+                wav = results[0].audio if len(results) == 1 else mx.concatenate([r.audio for r in results], axis=0)
+                data = _wav_bytes(wav, sr)
+            yield data
+            continue
+
+        # Streaming: stream_generate() keeps model state live between pieces,
+        # so the lock has to span the whole chunk. To avoid holding it across
+        # our own `yield`s (the deadlock trap above), a producer thread owns the
+        # lock and drops finished pieces into a queue; it always runs the chunk
+        # to completion, so an abandoned consumer wastes at most one chunk and
+        # can never wedge the lock.
+        q: queue.Queue = queue.Queue()
+
+        def produce(chunk=chunk):
+            try:
+                with _lock:
+                    model._conds = _get_conds(model, voice, preset)
+                    for r in model.stream_generate(
+                        text=chunk, chunk_size=STREAM_TOKEN_CHUNK, cfg_weight=0.0, exaggeration=0.0, verbose=False
+                    ):
+                        q.put(_wav_bytes(r.audio, sr))
+            except BaseException as e:  # hand the failure to the consumer
+                q.put(e)
+            finally:
+                q.put(None)
+
+        threading.Thread(target=produce, daemon=True).start()
+        while (item := q.get()) is not None:
+            if isinstance(item, BaseException):
+                raise item
+            yield item
 
 
 def synthesize(text: str, voice: str = "default", word_budget: int = CHUNK_WORD_BUDGET) -> Path:
@@ -173,7 +239,7 @@ def synthesize(text: str, voice: str = "default", word_budget: int = CHUNK_WORD_
     tmp_dir = Path(tempfile.mkdtemp(prefix="tts_"))
     try:
         chunk_paths = []
-        for i, data in enumerate(iter_speech(text, voice, word_budget)):
+        for i, data in enumerate(iter_speech(text, voice, word_budget, stream=False)):
             p = tmp_dir / f"part_{i:04d}.wav"
             p.write_bytes(data)
             chunk_paths.append(p)
@@ -187,9 +253,34 @@ def synthesize(text: str, voice: str = "default", word_budget: int = CHUNK_WORD_
 
 def warm_up() -> None:
     """Run one throwaway generation so the first real request isn't slowed by
-    MLX's one-time kernel compilation."""
-    try:
-        for _ in iter_speech("Hello.", "default"):
-            pass
-    except Exception:
+    MLX's one-time kernel compilation. Deliberately lets any failure propagate:
+    if the model can't load, better to die at startup than to print "Ready."
+    and then fail every request."""
+    for _ in iter_speech("Hello there.", "default", stream=False):
         pass
+    for _ in iter_speech("Hello there.", "default", stream=True):  # compiles the streaming kernels too
+        pass
+
+
+def prewarm_voices() -> None:
+    """Compute conditioning for every voice in voices.json so the first pick of
+    each one is instant. Meant to run in a background thread after startup:
+    each voice takes _lock briefly, so a real request that arrives mid-way just
+    waits for the current voice to finish (~1s) rather than for all of them."""
+    import time
+
+    model = get_model()
+    voices = load_voices()
+    ok = 0
+    for name, preset in voices.items():
+        try:
+            with _lock:
+                _get_conds(model, name, preset)
+            ok += 1
+        except Exception as e:  # one bad clip shouldn't stop the rest
+            print(f"prewarm: skipping voice '{name}': {e}", flush=True)
+        # threading.Lock isn't fair: re-acquiring immediately in a tight loop
+        # can starve a real request for the whole pre-warm (~20s). A short
+        # pause hands the lock to anyone waiting.
+        time.sleep(0.1)
+    print(f"prewarm: {ok}/{len(voices)} voices ready.", flush=True)
