@@ -40,7 +40,10 @@ def main() -> None:
     chunk_paths: list[Path] = []
     now_playing: subprocess.Popen | None = None
     try:
-        for i, data in enumerate(iter_speech(text, args.voice, args.chunk_words)):
+        # stream=False on purpose: --play hands each piece to a separate afplay
+        # process, so ~1.6s streaming pieces would leave audible gaps between
+        # them. Sentence-sized chunks keep the gaps at natural pauses.
+        for i, data in enumerate(iter_speech(text, args.voice, args.chunk_words, stream=False)):
             path = tmp_dir / f"part_{i:04d}.wav"
             path.write_bytes(data)
             chunk_paths.append(path)

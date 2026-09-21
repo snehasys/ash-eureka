@@ -1,1 +1,6 @@
 add your mp3 voice training files here
+
+or create a symlink from an existing voicedir
+```
+$ % voicedir=$HOME/Documents/voiceover_sample_actors/; for mp3file in $(ls $voicedir); do; ln -s  $voicedir/$mp3file; done;
+```
