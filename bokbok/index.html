@@ -1,0 +1,756 @@
+<!doctype html>
+<title>ASH_Chat_bokbok</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg1: #eef2ff; --bg2: #fdf4ff;
+    --card: #ffffffdd; --text: #1e1b2e; --muted: #6b6478;
+    --accent1: #7c5cff; --accent2: #ff6fb0; --danger: #e5484d;
+    --border: #e6e1f5; --radius: 16px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg1: #14101f; --bg2: #1c1330;
+      --card: #221a35dd; --text: #f1eefc; --muted: #a79bc4;
+      --border: #34294f; --danger: #ff6369;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0; min-height: 100vh; color: var(--text);
+    display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+    background: radial-gradient(circle at 20% 10%, var(--bg1), var(--bg2));
+  }
+  .card {
+    width: 100%; max-width: 30rem; background: var(--card);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: 0 20px 40px -20px rgba(80, 40, 140, 0.35);
+    padding: 1.75rem; backdrop-filter: blur(6px);
+    transition: border-color 0.15s ease;
+  }
+  .card.dragover { border-color: var(--accent1); box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.25); }
+  h1 {
+    margin: 0 0 0.15rem; font-size: 1.4rem;
+    background: linear-gradient(90deg, var(--accent1), var(--accent2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { margin: 0 0 1.25rem; color: var(--muted); font-size: 0.85rem; }
+  label { display: block; font-size: 0.75rem; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 0.35rem; }
+  select, textarea {
+    width: 100%; font-size: 0.95rem; font-family: inherit; color: var(--text);
+    background: var(--bg1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.6rem 0.7rem; margin-bottom: 1rem;
+  }
+  @media (prefers-color-scheme: dark) { select, textarea { background: #1a1428; } }
+  textarea { height: 6rem; resize: vertical; }
+  .tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: -0.6rem 0 1rem; }
+  .tag {
+    font-size: 0.75rem; padding: 0.25rem 0.6rem; border-radius: 999px;
+    border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer;
+  }
+  .tag:hover { border-color: var(--accent1); color: var(--accent1); }
+  button#go {
+    width: 100%; font-size: 1rem; font-weight: 600; color: white; cursor: pointer;
+    padding: 0.7rem; border: none; border-radius: 10px;
+    background: linear-gradient(90deg, var(--accent1), var(--accent2));
+    box-shadow: 0 8px 20px -8px rgba(124, 92, 255, 0.6);
+    transition: transform 0.1s ease, opacity 0.2s ease;
+  }
+  button#go:active { transform: scale(0.98); }
+  button#go:disabled { opacity: 0.6; cursor: default; }
+  /* Native-style transport bar (play/pause, elapsed, seek, total) on top of
+     the streaming Web Audio player -- a real <audio> element can't consume
+     the stream, so its controls are rebuilt here. */
+  .player {
+    display: none; align-items: center; gap: 0.6rem; margin-top: 0.75rem;
+    padding: 0.45rem 0.7rem; border-radius: 999px;
+    background: var(--bg1); border: 1px solid var(--border);
+  }
+  @media (prefers-color-scheme: dark) { .player { background: #1a1428; } }
+  .player.show { display: flex; }
+  button#playPause {
+    width: 2.6rem; height: 2.6rem; border-radius: 50%; border: none; cursor: pointer;
+    background: linear-gradient(90deg, var(--accent1), var(--accent2)); color: white;
+    font-size: 1rem; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+    padding: 0; touch-action: manipulation; user-select: none; -webkit-user-select: none;
+    box-shadow: 0 6px 16px -8px rgba(124, 92, 255, 0.7);
+    transition: transform 0.1s ease, box-shadow 0.15s ease;
+  }
+  button#playPause:hover { transform: scale(1.06); box-shadow: 0 8px 20px -8px rgba(124, 92, 255, 0.9); }
+  button#playPause:active { transform: scale(0.94); }
+  .player .time { font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; flex: 0 0 auto; min-width: 2.6rem; }
+  .player .time.total { text-align: right; }
+  input#seek { flex: 1; min-width: 0; margin: 0; accent-color: var(--accent1); cursor: pointer; }
+  button#clear {
+    font-size: 1rem; border-radius: 10px; border: 1px solid var(--border);
+    background: transparent; color: var(--danger);
+  }
+  button#clear:hover { background: var(--bg1); border-color: var(--danger); }
+  select#speed { width: auto; margin-bottom: 0; padding: 0.6rem 0.5rem; flex: 0 0 auto; }
+  .status { min-height: 1.4rem; margin-top: 0.6rem; font-size: 0.85rem; color: var(--muted); }
+  .spinner {
+    display: inline-block; width: 0.8rem; height: 0.8rem; margin-right: 0.4rem;
+    border: 2px solid var(--border); border-top-color: var(--accent1);
+    border-radius: 50%; vertical-align: -1px; animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .row { display: flex; gap: 0.5rem; align-items: center; }
+  button#deleteVoice {
+    font-size: 0.95rem; border-radius: 10px; border: 1px solid var(--border);
+    background: transparent; color: var(--danger); flex: 0 0 auto; padding: 0 0.7rem; cursor: pointer;
+  }
+  button#deleteVoice:hover { background: var(--bg1); border-color: var(--danger); }
+  /* ---- Add a voice ---- */
+  .voice-manager {
+    margin-top: 1.4rem; padding: 1rem 1.1rem 0.9rem; border-radius: 14px;
+    border: 1px dashed var(--border);
+    background: linear-gradient(135deg, rgba(124, 92, 255, 0.07), rgba(255, 111, 176, 0.07));
+    transition: border-color 0.15s ease;
+  }
+  .voice-manager:hover { border-color: var(--accent1); }
+  .vm-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.7rem; }
+  .vm-title {
+    font-weight: 700; font-size: 0.95rem;
+    background: linear-gradient(90deg, var(--accent1), var(--accent2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .vm-hint { font-size: 0.75rem; color: var(--muted); }
+  .vm-actions { display: flex; gap: 0.5rem; }
+  .vm-actions button {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 0.45rem;
+    font-size: 0.9rem; font-weight: 600; font-family: inherit; padding: 0.65rem 0.8rem;
+    border-radius: 12px; border: 1px solid var(--border); background: var(--card); color: var(--text);
+    cursor: pointer; touch-action: manipulation;
+    transition: transform 0.1s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .vm-actions button:hover { border-color: var(--accent1); box-shadow: 0 6px 16px -10px rgba(124, 92, 255, 0.8); }
+  .vm-actions button:active { transform: scale(0.98); }
+  .vm-actions button:disabled { opacity: 0.45; cursor: default; box-shadow: none; transform: none; }
+  #recordBtn .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--danger); flex: 0 0 auto; }
+  #recordBtn.recording { border-color: var(--danger); color: var(--danger); }
+  #recordBtn.recording .dot { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.6); opacity: 0.45; } }
+  #recordTimer { font-variant-numeric: tabular-nums; font-size: 0.8rem; color: var(--muted); }
+  #recordBtn.recording #recordTimer { color: var(--danger); }
+  .vm-review { display: none; margin-top: 0.75rem; }
+  .vm-review.show { display: block; }
+  .vm-review audio { width: 100%; margin-bottom: 0.6rem; }
+  input[type="text"] {
+    font-size: 0.9rem; font-family: inherit; color: var(--text);
+    background: var(--bg1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 0.6rem 0.75rem;
+  }
+  @media (prefers-color-scheme: dark) { input[type="text"] { background: #1a1428; } }
+  button#voiceSave {
+    font-size: 0.9rem; font-weight: 600; font-family: inherit; color: white; border: none; border-radius: 12px;
+    padding: 0.6rem 1rem; white-space: nowrap; cursor: pointer; touch-action: manipulation;
+    background: linear-gradient(90deg, var(--accent1), var(--accent2));
+    box-shadow: 0 8px 20px -8px rgba(124, 92, 255, 0.6); transition: transform 0.1s ease, opacity 0.2s ease;
+  }
+  button#voiceSave:active { transform: scale(0.98); }
+  button#voiceSave:disabled { opacity: 0.5; cursor: default; box-shadow: none; transform: none; }
+</style>
+<div class="card">
+  <h1>ASH_Chat_bokbok</h1>
+  <p class="sub">Pick a voice, type something, hear it on this device.</p>
+
+  <label for="voice">Voice</label>
+  <div class="row" style="margin-bottom:1rem;">
+    <select id="voice" style="flex:1; margin-bottom:0;"></select>
+    <button id="deleteVoice" type="button" style="display:none" title="Delete this voice">&#128465;&#65039;</button>
+  </div>
+
+  <div class="row" style="justify-content:space-between; margin-bottom:0.35rem;">
+    <label for="text" style="margin:0">Text</label>
+    <button class="tag" type="button" id="loadTextBtn" title="Or drag a .txt / .md file anywhere onto this card">&#128196; Load text file</button>
+    <input type="file" id="textFile" accept=".txt,.md,.markdown,.text,text/plain,text/markdown" hidden>
+  </div>
+  <textarea id="text" placeholder="Hi there! [chuckle] how's it going?  (or drop a .txt file here)"></textarea>
+  <div class="tags">
+    <button class="tag" type="button" data-tag="chuckle">chuckle</button>
+    <button class="tag" type="button" data-tag="laugh">laugh</button>
+    <button class="tag" type="button" data-tag="sigh">sigh</button>
+    <button class="tag" type="button" data-tag="gasp">gasp</button>
+    <button class="tag" type="button" data-tag="cough">cough</button>
+    <button class="tag" type="button" data-tag="groan">groan</button>
+    <button class="tag" type="button" data-tag="sniff">sniff</button>
+    <button class="tag" type="button" data-tag="shush">shush</button>
+    <button class="tag" type="button" data-tag="clear throat">clear throat</button>
+  </div>
+
+  <div style="display:flex; gap:0.5rem;">
+    <select id="speed" title="Playback speed">
+      <option value="0.75">0.75x</option>
+      <option value="1" selected>1x</option>
+      <option value="1.25">1.25x</option>
+      <option value="1.5">1.5x</option>
+      <option value="2">2x</option>
+    </select>
+    <button id="go" style="flex:1">Speak</button>
+    <button id="clear" style="flex:0 0 auto; width:auto; padding:0 1rem;" title="Stop and discard the loaded audio (keeps your text, voice and speed)">&#128465;&#65039;</button>
+  </div>
+  <div class="player" id="player">
+    <button id="playPause" type="button" title="Play / pause">&#9654;</button>
+    <span class="time" id="timeElapsed">0:00</span>
+    <input type="range" id="seek" min="0" max="0" step="0.1" value="0" title="Seek">
+    <span class="time total" id="timeTotal">0:00</span>
+  </div>
+  <div class="status" id="status"></div>
+
+  <div class="voice-manager">
+    <div class="vm-head">
+      <span class="vm-title">&#10024; Add a voice</span>
+      <span class="vm-hint">say a few lines, or drop any audio file on this card</span>
+    </div>
+    <div class="vm-actions">
+      <button id="recordBtn" type="button"><span class="dot"></span><span id="recordLbl">Record</span><span id="recordTimer"></span></button>
+      <button id="uploadBtn" type="button">&#11014;&#65039; Upload</button>
+      <input type="file" id="voiceFile" accept="audio/*" hidden>
+    </div>
+    <div class="vm-review" id="voiceReview">
+      <audio id="voicePreview" controls></audio>
+      <div class="row">
+        <input type="text" id="voiceName" placeholder="Name this voice" maxlength="60" style="flex:1">
+        <button id="voiceSave" type="button" disabled>Save voice</button>
+      </div>
+    </div>
+    <div class="status" id="voiceStatus"></div>
+  </div>
+</div>
+<script>
+const GROUPS = [
+  ["uk_", "British / Irish"], ["us_", "American"], ["hindi_", "Hindi"],
+  ["custom_", "Your recordings"],
+];
+
+const textEl = document.getElementById("text");
+document.querySelectorAll(".tag").forEach(btn => {
+  btn.onclick = () => {
+    const insert = `[${btn.dataset.tag}] `;
+    const pos = textEl.selectionStart ?? textEl.value.length;
+    textEl.value = textEl.value.slice(0, pos) + insert + textEl.value.slice(pos);
+    textEl.focus();
+    textEl.selectionStart = textEl.selectionEnd = pos + insert.length;
+  };
+});
+
+// ---- Load text from a file (button or drag-and-drop onto the card) --------
+const MAX_TEXT_CHARS = 300000;  // keep in sync with app.py
+const card = document.querySelector(".card");
+const loadTextBtn = document.getElementById("loadTextBtn");
+const textFileInput = document.getElementById("textFile");
+const TEXT_EXTS = /\.(txt|md|markdown|text)$/i;
+
+async function loadTextFile(file) {
+  if (!(file.type.startsWith("text/") || TEXT_EXTS.test(file.name))) {
+    status.textContent = `"${file.name}" isn't a text file -- drop a .txt or .md.`;
+    return;
+  }
+  const content = (await file.text()).trim();
+  textEl.value = content;
+  const words = content.split(/\s+/).filter(Boolean).length;
+  const mins = Math.max(1, Math.round(words / 150));
+  status.textContent = content.length > MAX_TEXT_CHARS
+    ? `Loaded "${file.name}" but it's ${content.length.toLocaleString()} chars -- over the ${MAX_TEXT_CHARS.toLocaleString()} limit, trim it first.`
+    : `Loaded "${file.name}": ${words.toLocaleString()} words (~${mins} min of speech).`;
+}
+loadTextBtn.onclick = () => textFileInput.click();
+textFileInput.onchange = () => {
+  if (textFileInput.files[0]) loadTextFile(textFileInput.files[0]);
+  textFileInput.value = "";
+};
+
+// Drop anywhere on the card: text files fill the text box, audio files go to
+// "Add a voice". preventDefault on dragover is what makes drop fire at all.
+for (const ev of ["dragenter", "dragover"]) card.addEventListener(ev, e => { e.preventDefault(); card.classList.add("dragover"); });
+for (const ev of ["dragleave", "drop"]) card.addEventListener(ev, e => { e.preventDefault(); card.classList.remove("dragover"); });
+card.addEventListener("drop", e => {
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  if (file.type.startsWith("audio/")) handleIncomingAudio(file);
+  else loadTextFile(file);
+});
+
+const goBtn = document.getElementById("go");
+const clearBtn = document.getElementById("clear");
+const playerEl = document.getElementById("player");
+const playPauseBtn = document.getElementById("playPause");
+const seekEl = document.getElementById("seek");
+const timeElapsedEl = document.getElementById("timeElapsed");
+const timeTotalEl = document.getElementById("timeTotal");
+const speedSel = document.getElementById("speed");
+const status = document.getElementById("status");
+const voiceSel = document.getElementById("voice");
+const deleteVoiceBtn = document.getElementById("deleteVoice");
+
+function updateDeleteVisibility() {
+  deleteVoiceBtn.style.display = voiceSel.value.startsWith("custom_") ? "inline-block" : "none";
+}
+
+async function loadVoices(selectName) {
+  const voices = await fetch("/voices").then(r => r.json());
+  const keep = selectName ?? voiceSel.value;
+  voiceSel.innerHTML = "";
+  const groups = {};
+  for (const [name, desc] of Object.entries(voices)) {
+    const hit = GROUPS.find(([prefix]) => name.startsWith(prefix));
+    const label = hit ? hit[1] : "Built-in";
+    (groups[label] ??= []).push([name, desc]);
+  }
+  for (const [label, entries] of Object.entries(groups)) {
+    const og = document.createElement("optgroup");
+    og.label = label;
+    for (const [name, desc] of entries) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = desc || name;
+      og.appendChild(opt);
+    }
+    voiceSel.appendChild(og);
+  }
+  if (keep && [...voiceSel.options].some(o => o.value === keep)) voiceSel.value = keep;
+  updateDeleteVisibility();
+}
+
+voiceSel.onchange = updateDeleteVisibility;
+
+// ---- Player ---------------------------------------------------------------
+// Audio streams in as ~1.6s pieces and is played gaplessly via the Web Audio
+// API. The pieces form a timeline (in seconds) that grows while generating;
+// the transport bar above works against that timeline: play/pause, elapsed,
+// seek. Decoded audio is float32 (~5.8MB/min), so only the most recent
+// KEEP_SECONDS stay seekable on very long texts -- older pieces are dropped
+// and the slider's left edge moves up, like a live-stream DVR window.
+const ctx = new (window.AudioContext || window.webkitAudioContext)();
+const KEEP_SECONDS = 900;
+
+// Mobile browsers (iOS especially) only let audio start from inside a user
+// gesture, and the context must be resumed *synchronously* in that gesture --
+// after an `await` the permission is gone. So: resume on the very first touch
+// anywhere, and again (un-awaited) at the top of every play-ish tap.
+function unlockAudio() { if (ctx.state !== "running") ctx.resume().catch(() => {}); }
+for (const ev of ["touchend", "pointerdown", "keydown"]) document.addEventListener(ev, unlockAudio, { once: false, passive: true });
+
+// Keep the screen on while something is playing -- iOS stops the page's JS
+// (and with it the stream) when the screen locks.
+let wakeLock = null;
+async function holdWakeLock() {
+  try { if (!wakeLock && navigator.wakeLock) wakeLock = await navigator.wakeLock.request("screen"); } catch {}
+}
+function releaseWakeLock() { try { wakeLock?.release(); } catch {} wakeLock = null; }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && playing) holdWakeLock(); });
+
+let pieces = [];        // decoded AudioBuffers, in order
+let pieceStarts = [];   // timeline start (s) of each piece
+let windowStart = 0;    // timeline seconds already dropped from the front
+let totalDuration = 0;  // timeline end (s); grows while streaming
+let streamDone = true;
+let playing = false;
+let position = 0;       // playhead (s) while paused
+let playStartPos = 0, playStartCtx = 0;  // while playing: pos = playStartPos + (ctx.now - playStartCtx) * speed
+let nextStartTime = 0;  // ctx time the next scheduled piece begins
+let activeSources = [];
+let speed = 1;
+let seekDragging = false;
+let lastVoice = null;   // voice the loaded audio was generated with
+let inFlight = null;    // AbortController for the request currently streaming in, if any
+
+const fmt = s => { s = Math.max(0, Math.floor(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const currentPosition = () =>
+  playing ? Math.min(playStartPos + (ctx.currentTime - playStartCtx) * speed, totalDuration) : position;
+
+function stopSources() {
+  activeSources.forEach(s => { try { s.onended = null; s.stop(); } catch {} });
+  activeSources = [];
+}
+
+function schedulePiece(i, when, offset = 0) {
+  const src = ctx.createBufferSource();
+  src.buffer = pieces[i];
+  src.playbackRate.value = speed;
+  src.connect(ctx.destination);
+  src.start(when, offset);
+  activeSources.push(src);
+  src.onended = () => { activeSources = activeSources.filter(s => s !== src); };
+  nextStartTime = when + (pieces[i].duration - offset) / speed;
+}
+
+let renderedPlaying = null;
+function render() {
+  const pos = currentPosition();
+  timeElapsedEl.textContent = fmt(pos);
+  timeTotalEl.textContent = fmt(totalDuration) + (streamDone ? "" : "+");
+  seekEl.min = windowStart;
+  seekEl.max = totalDuration;
+  if (!seekDragging) seekEl.value = pos;
+  // Only swap the glyph on a state change: rewriting the button's contents
+  // every tick can swallow a tap that's in progress, especially on touch.
+  if (renderedPlaying !== playing) {
+    playPauseBtn.innerHTML = playing ? "&#10074;&#10074;" : "&#9654;";
+    renderedPlaying = playing;
+  }
+}
+
+function playFrom(pos) {
+  stopSources();
+  pos = Math.min(Math.max(pos, windowStart), totalDuration);
+  let i = pieceStarts.findIndex((s, k) => pos < s + pieces[k].duration);
+  if (i === -1 && streamDone) { playing = false; position = totalDuration; render(); return; }
+  playing = true;
+  playStartPos = pos;
+  playStartCtx = ctx.currentTime;
+  nextStartTime = ctx.currentTime;
+  if (i !== -1) {
+    schedulePiece(i, ctx.currentTime, pos - pieceStarts[i]);
+    for (let k = i + 1; k < pieces.length; k++) schedulePiece(k, nextStartTime);
+  }
+  render();
+}
+
+function pause() {
+  position = currentPosition();
+  playing = false;
+  stopSources();
+  render();
+}
+
+function addPiece(buf) {
+  // If playback caught up with generation, the chain went silent; re-anchor
+  // the playhead at the end of what we had so the new piece starts right now.
+  if (playing && ctx.currentTime > nextStartTime) {
+    playStartPos = currentPosition();
+    playStartCtx = ctx.currentTime;
+    nextStartTime = ctx.currentTime;
+  }
+  pieceStarts.push(totalDuration);
+  pieces.push(buf);
+  totalDuration += buf.duration;
+  while (totalDuration - windowStart > KEEP_SECONDS && pieces.length > 1) {
+    windowStart += pieces.shift().duration;
+    pieceStarts.shift();
+  }
+  if (playing) schedulePiece(pieces.length - 1, nextStartTime);
+  render();
+}
+
+function resetPlayer() {
+  if (inFlight) inFlight.abort();
+  stopSources();
+  releaseWakeLock();
+  pieces = []; pieceStarts = [];
+  windowStart = 0; totalDuration = 0; position = 0;
+  playing = false; streamDone = true; lastVoice = null;
+  playerEl.classList.remove("show");
+  render();
+}
+
+setInterval(() => {
+  if (!playing) return;
+  if (streamDone && currentPosition() >= totalDuration - 0.05) { playing = false; position = totalDuration; stopSources(); releaseWakeLock(); }
+  render();
+}, 100);
+
+playPauseBtn.onclick = async () => {
+  if (playing) { pause(); releaseWakeLock(); return; }
+  unlockAudio();
+  playFrom(position >= totalDuration - 0.05 ? windowStart : position);
+  holdWakeLock();
+};
+
+seekEl.addEventListener("pointerdown", () => { seekDragging = true; });
+seekEl.addEventListener("input", () => { timeElapsedEl.textContent = fmt(parseFloat(seekEl.value)); });
+seekEl.addEventListener("change", () => {
+  seekDragging = false;
+  const t = parseFloat(seekEl.value);
+  if (playing) playFrom(t); else { position = t; render(); }
+});
+// `change` doesn't fire if you press and release without moving -- make sure
+// the slider never gets stuck in "dragging" and stops tracking playback.
+for (const ev of ["pointerup", "pointercancel"]) window.addEventListener(ev, () => { seekDragging = false; });
+
+speedSel.onchange = () => {
+  const pos = currentPosition();  // read with the old speed before switching
+  speed = parseFloat(speedSel.value);
+  if (playing) playFrom(pos);
+};
+
+goBtn.onclick = async () => {
+  unlockAudio();  // must be the first thing in the tap, before any await
+  const text = textEl.value.trim();
+  const voice = voiceSel.value;
+  if (!text) { status.textContent = "Type something first."; return; }
+
+  resetPlayer();
+  holdWakeLock();
+  goBtn.disabled = true;
+  streamDone = false;
+  lastVoice = voice;
+  playerEl.classList.add("show");
+  status.innerHTML = '<span class="spinner"></span>Generating...';
+  // Bengali/Hindi go through a second engine that loads lazily: say so,
+  // instead of looking stuck for the ~30s (or a one-time ~3GB download).
+  if (/[ঀ-৿ऀ-ॿ]/.test(text)) {
+    try {
+      const s = await fetch("/status").then(r => r.json());
+      if (!s.omni_loaded) status.innerHTML = '<span class="spinner"></span>' +
+        (s.omni_cached ? "Loading the Bengali/Hindi engine (~30s the first time after a restart)..."
+                       : "Downloading the Bengali/Hindi engine (~3GB, one time only)...");
+    } catch {}
+  }
+
+  const abortController = new AbortController();
+  inFlight = abortController;
+
+  try {
+    if (ctx.state !== "running") {
+      try { await ctx.resume(); } catch {}
+      if (ctx.state !== "running") {
+        status.textContent = "Audio is blocked by the browser -- tap ▶ on the player once it appears. (iPhone: also check the ring/silent switch.)";
+      }
+    }
+    const resp = await fetch("/speak/stream", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({text, voice}),
+      signal: abortController.signal,
+    });
+    if (!resp.ok) throw new Error((await resp.json()).error || "Something went wrong");
+
+    const reader = resp.body.getReader();
+    let buffered = new Uint8Array(0);
+    const append = (a, b) => {
+      const merged = new Uint8Array(a.length + b.length);
+      merged.set(a, 0);
+      merged.set(b, a.length);
+      return merged;
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (value) buffered = append(buffered, value);
+      while (buffered.length >= 4) {
+        const len = new DataView(buffered.buffer, buffered.byteOffset, 4).getUint32(0, false);
+        if (len === 0xFFFFFFFF) {  // in-band error frame: <len><msg>
+          if (buffered.length < 8) break;
+          const msgLen = new DataView(buffered.buffer, buffered.byteOffset, 8).getUint32(4, false);
+          if (buffered.length < 8 + msgLen) break;
+          throw new Error(new TextDecoder().decode(buffered.slice(8, 8 + msgLen)));
+        }
+        if (buffered.length < 4 + len) break;
+        const wavBytes = buffered.slice(4, 4 + len);
+        buffered = buffered.slice(4 + len);
+        if (abortController.signal.aborted) break;
+        const buf = await ctx.decodeAudioData(wavBytes.buffer);
+        if (abortController.signal.aborted) break;  // Clear may have hit while decoding
+        addPiece(buf);
+        if (pieces.length === 1) playFrom(0);  // auto-start on the first piece
+      }
+      if (done) break;
+    }
+    if (inFlight === abortController) status.textContent = "";
+  } catch (err) {
+    if (err.name !== "AbortError" && inFlight === abortController) status.textContent = "Error: " + err.message;
+  } finally {
+    // Only wrap up if we're still the current request -- if the user hit
+    // Clear and then Speak again, a newer stream owns the player now.
+    if (inFlight === abortController) {
+      streamDone = true;
+      inFlight = null;
+      goBtn.disabled = false;
+      render();
+    }
+  }
+};
+
+// Clear: stop and discard the audio only. Your text, voice and speed stay as they are.
+clearBtn.onclick = () => {
+  resetPlayer();
+  status.textContent = "";
+  goBtn.disabled = false;
+};
+
+// ---- Add/delete a voice -----------------------------------------------
+
+// Encode a decoded AudioBuffer as a canonical 16-bit PCM WAV Blob.
+function audioBufferToWav(buffer) {
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const numFrames = buffer.length;
+  const blockAlign = numChannels * 2; // 16-bit samples
+  const dataSize = numFrames * blockAlign;
+  const ab = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(ab);
+  const writeStr = (offset, str) => { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); };
+
+  writeStr(0, "RIFF"); view.setUint32(4, 36 + dataSize, true); writeStr(8, "WAVE");
+  writeStr(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true); view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true); view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true); writeStr(36, "data"); view.setUint32(40, dataSize, true);
+
+  const channels = [];
+  for (let c = 0; c < numChannels; c++) channels.push(buffer.getChannelData(c));
+  let offset = 44;
+  for (let i = 0; i < numFrames; i++) {
+    for (let c = 0; c < numChannels; c++) {
+      const s = Math.max(-1, Math.min(1, channels[c][i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      offset += 2;
+    }
+  }
+  return new Blob([ab], { type: "audio/wav" });
+}
+
+// Some older Safari versions only support the callback form of decodeAudioData.
+function decodeAudioDataCompat(actx, arrayBuf) {
+  return new Promise((resolve, reject) => {
+    const maybe = actx.decodeAudioData(arrayBuf, resolve, reject);
+    if (maybe && typeof maybe.then === "function") maybe.then(resolve, reject);
+  });
+}
+
+// Decode ANY browser-supported audio Blob (webm/Opus from MediaRecorder,
+// m4a/AAC from a phone recording app, mp3, wav, ...) into a standard WAV Blob
+// entirely client-side. This is what lets us accept mic recordings and
+// arbitrary uploaded files without ever needing ffmpeg on the server.
+async function blobToWavBlob(blob) {
+  const arrayBuf = await blob.arrayBuffer();
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const decodeCtx = new AC();
+  try {
+    const audioBuffer = await decodeAudioDataCompat(decodeCtx, arrayBuf);
+    return { wavBlob: audioBufferToWav(audioBuffer), duration: audioBuffer.duration };
+  } finally {
+    decodeCtx.close();
+  }
+}
+
+const recordBtn = document.getElementById("recordBtn");
+const recordLbl = document.getElementById("recordLbl");
+const recordTimer = document.getElementById("recordTimer");
+const uploadBtn = document.getElementById("uploadBtn");
+const fileInput = document.getElementById("voiceFile");
+const voiceReview = document.getElementById("voiceReview");
+const voicePreview = document.getElementById("voicePreview");
+const voiceNameInput = document.getElementById("voiceName");
+const voiceSaveBtn = document.getElementById("voiceSave");
+const voiceStatus = document.getElementById("voiceStatus");
+
+let pendingWavBlob = null;
+
+async function handleIncomingAudio(blob) {
+  voiceStatus.textContent = "";
+  try {
+    const { wavBlob, duration } = await blobToWavBlob(blob);
+    if (duration <= 5) {
+      voiceStatus.textContent = `That's only ${duration.toFixed(1)}s -- needs to be over 5 seconds.`;
+      pendingWavBlob = null;
+      voiceSaveBtn.disabled = true;
+      voiceReview.classList.remove("show");
+      return;
+    }
+    pendingWavBlob = wavBlob;
+    voicePreview.src = URL.createObjectURL(wavBlob);
+    voiceReview.classList.add("show");
+    voiceSaveBtn.disabled = !voiceNameInput.value.trim();
+    if (!voiceNameInput.value.trim()) voiceNameInput.focus();
+  } catch (err) {
+    voiceStatus.textContent = "Couldn't read that audio. Try a .wav or .mp3, or record with the mic.";
+    pendingWavBlob = null;
+    voiceSaveBtn.disabled = true;
+    voiceReview.classList.remove("show");
+  }
+}
+
+// Mic recording only works in a secure context (localhost/127.0.0.1 or HTTPS)
+// -- disable proactively so guests on Wi-Fi see why it's greyed out.
+const canRecord = window.isSecureContext && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+if (!canRecord) {
+  recordBtn.disabled = true;
+  recordBtn.title = "Mic recording only works when this page is opened as http://localhost or 127.0.0.1 on this Mac -- use the file picker from other devices.";
+}
+
+let mediaRecorder = null, recordedChunks = [], recordStartedAt = 0, recordTimerHandle = null;
+
+recordBtn.onclick = async () => {
+  if (mediaRecorder && mediaRecorder.state === "recording") {
+    mediaRecorder.stop();
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    voiceStatus.textContent = "Microphone permission was denied.";
+    return;
+  }
+  recordedChunks = [];
+  mediaRecorder = new MediaRecorder(stream);
+  mediaRecorder.ondataavailable = e => { if (e.data.size) recordedChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    clearInterval(recordTimerHandle);
+    recordTimer.textContent = "";
+    recordLbl.textContent = "Record";
+    recordBtn.classList.remove("recording");
+    handleIncomingAudio(new Blob(recordedChunks, { type: mediaRecorder.mimeType }));
+  };
+  mediaRecorder.start();
+  recordStartedAt = Date.now();
+  recordLbl.textContent = "Stop";
+  recordBtn.classList.add("recording");
+  recordTimerHandle = setInterval(() => {
+    recordTimer.textContent = ((Date.now() - recordStartedAt) / 1000).toFixed(1) + "s";
+  }, 100);
+};
+
+uploadBtn.onclick = () => fileInput.click();
+fileInput.onchange = () => {
+  if (fileInput.files[0]) handleIncomingAudio(fileInput.files[0]);
+  fileInput.value = "";  // so picking the same file again still fires change
+};
+voiceNameInput.oninput = () => { voiceSaveBtn.disabled = !pendingWavBlob || !voiceNameInput.value.trim(); };
+
+voiceSaveBtn.onclick = async () => {
+  const name = voiceNameInput.value.trim();
+  if (!name || !pendingWavBlob) return;
+  voiceSaveBtn.disabled = true;
+  voiceStatus.innerHTML = '<span class="spinner"></span>Saving...';
+  try {
+    const form = new FormData();
+    form.append("name", name);
+    form.append("audio", pendingWavBlob, "recording.wav");
+    const resp = await fetch("/voices", { method: "POST", body: form });
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(body.error || "Save failed");
+    voiceStatus.textContent = `Saved "${name}" -- it's selected and ready to speak.`;
+    pendingWavBlob = null;
+    voiceReview.classList.remove("show");
+    voiceNameInput.value = "";
+    await loadVoices(body.name); // select the new voice
+  } catch (err) {
+    voiceStatus.textContent = "Error: " + err.message;
+    voiceSaveBtn.disabled = false;
+  }
+};
+
+deleteVoiceBtn.onclick = async () => {
+  const name = voiceSel.value;
+  if (!name.startsWith("custom_")) return;
+  const label = voiceSel.selectedOptions[0]?.textContent || name;
+  if (!confirm(`Delete voice "${label}"? This can't be undone.`)) return;
+  try {
+    const resp = await fetch(`/voices/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (!resp.ok) throw new Error((await resp.json()).error || "Delete failed");
+    if (name === lastVoice) resetPlayer();
+    await loadVoices();
+    status.textContent = "Voice deleted.";
+  } catch (err) {
+    status.textContent = "Error: " + err.message;
+  }
+};
+
+loadVoices();
+</script>

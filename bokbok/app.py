@@ -9,6 +9,7 @@ device on the same network.
 
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -18,9 +19,38 @@ import threading
 import wave
 from pathlib import Path
 
+# Quiet the noise so the log is just what this app is doing (see tts_core.log):
+# no per-token progress bars from the models, no HF "model type" warnings, and
+# no per-request access lines from the dev server (errors still show).
+os.environ.setdefault("TQDM_DISABLE", "1")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")  # "PyTorch was not found" banner etc.
+os.environ.setdefault("HF_HUB_VERBOSITY", "error")  # "unauthenticated requests" nag
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
+try:
+    from transformers.utils import logging as _hf_logging
+
+    _hf_logging.set_verbosity_error()
+except Exception:
+    pass
+
 from flask import Flask, Response, jsonify, request, send_file
 
-from tts_core import VOICES_FILE, iter_speech, load_voices, prewarm_voices, synthesize, warm_up
+from tts_core import (
+    VOICES_FILE,
+    iter_speech,
+    load_voices,
+    log,
+    omni_is_cached,
+    omni_is_loaded,
+    prewarm_voices,
+    synthesize,
+    warm_up,
+)
+
+# Frames on /speak/stream are <4-byte big-endian length><wav bytes>. This
+# length value instead marks an error frame: <ERROR_FRAME><4-byte len><utf-8 message>,
+# so a failure mid-stream reaches the browser as a message rather than silence.
+ERROR_FRAME = 0xFFFFFFFF
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # short voice clips only; also caps upload DoS
@@ -56,8 +86,17 @@ def _slugify(name: str) -> str:
 PAGE_FILE = Path(__file__).parent / "index.html"
 
 
+def _device(ua: str) -> str:
+    for needle, name in (("iPhone", "iPhone"), ("iPad", "iPad"), ("Android", "Android"), ("Macintosh", "Mac"),
+                         ("Windows", "Windows"), ("Linux", "Linux"), ("curl", "curl")):
+        if needle in ua:
+            return name
+    return "unknown device"
+
+
 @app.get("/")
 def index():
+    log(f"page opened from {request.remote_addr} ({_device(request.user_agent.string)})")
     # Read per request so edits to index.html show up on refresh without a restart.
     return PAGE_FILE.read_text()
 
@@ -65,6 +104,13 @@ def index():
 @app.get("/voices")
 def voices():
     return jsonify({name: p.get("description", "") for name, p in load_voices().items()})
+
+
+@app.get("/status")
+def status():
+    # Lets the page warn that the first Bengali/Hindi request will take a
+    # while (engine still loading, or not even downloaded yet).
+    return jsonify(omni_loaded=omni_is_loaded(), omni_cached=omni_is_cached())
 
 
 @app.post("/voices")
@@ -116,6 +162,7 @@ def add_voice():
             "description": description,
         }
         VOICES_FILE.write_text(json.dumps(voices_raw, indent=2))
+    log(f"voice added: '{key}' ({duration:.1f}s clip) from {request.remote_addr}")
     return jsonify(name=key, description=description), 201
 
 
@@ -141,6 +188,7 @@ def delete_voice(name):
         if abs_path.resolve().is_relative_to(RECORDED_DIR.resolve()):
             abs_path.unlink(missing_ok=True)
 
+    log(f"voice deleted: '{name}' from {request.remote_addr}")
     return jsonify(deleted=name)
 
 
@@ -177,9 +225,16 @@ def speak_stream():
     if voice not in load_voices():
         return jsonify(error=f"Unknown voice '{voice}'"), 400
 
+    client = request.remote_addr  # read now: the generator below runs after the request context is gone
+
     def framed():
-        for wav_bytes in iter_speech(text, voice):
-            yield struct.pack(">I", len(wav_bytes)) + wav_bytes
+        try:
+            for wav_bytes in iter_speech(text, voice, client=client):
+                yield struct.pack(">I", len(wav_bytes)) + wav_bytes
+        except Exception as e:  # headers are long gone; report in-band instead of going silent
+            log(f"✗ request from {client} failed -- {type(e).__name__}: {e}")
+            msg = f"{type(e).__name__}: {e}".encode()
+            yield struct.pack(">I", ERROR_FRAME) + struct.pack(">I", len(msg)) + msg
 
     response = Response(framed(), mimetype="application/octet-stream")
     # Without this, Werkzeug auto-computes Content-Length by fully draining

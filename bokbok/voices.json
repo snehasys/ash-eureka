@@ -4,6 +4,21 @@
     "ref_text": null,
     "description": "Model's built-in voice (no cloning)"
   },
+  "nate_sultry": {
+    "ref_audio": "voices/voiceover_sample_actors/nate_sultry.wav",
+    "ref_text": null,
+    "description": "nate_sultry"
+  },
+  "springbokasmr": {
+    "ref_audio": "voices/voiceover_sample_actors/springbokasmr.wav",
+    "ref_text": null,
+    "description": "springbokasmr"
+  },
+  "almee_tranquil_asmr": {
+    "ref_audio": "voices/voiceover_sample_actors/almee_tranquil_asmr.wav",
+    "ref_text": null,
+    "description": "almee_tranquil_asmr"
+  },
   "uk_female_abigail": {
     "ref_audio": "voices/voiceover_sample_actors/ENG_UK_Abigail_vagabond.wav",
     "ref_text": null,
